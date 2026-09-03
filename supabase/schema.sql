@@ -214,8 +214,65 @@ CREATE POLICY "Authenticated users can read education" ON public.education_conte
   FOR SELECT USING (auth.role() = 'authenticated');
 
 -- ============================================================
--- UPDATED_AT TRIGGER
+-- 9. DOCUMENTS TABLE (RAG Medical Vector Embeddings)
 -- ============================================================
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE IF NOT EXISTS public.documents (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  filename TEXT NOT NULL,
+  content TEXT NOT NULL,
+  metadata JSONB DEFAULT '{}'::jsonb,
+  embedding VECTOR(384) NOT NULL, -- 384 dimensions for local all-MiniLM-L6-v2
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS documents_embedding_hnsw_idx
+ON public.documents
+USING hnsw (embedding vector_cosine_ops)
+WITH (m = 16, ef_construction = 64);
+
+CREATE INDEX IF NOT EXISTS documents_metadata_gin_idx
+ON public.documents
+USING gin (metadata);
+
+ALTER TABLE public.documents ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow public read documents" ON public.documents
+  FOR SELECT USING (true);
+
+-- Similarity Match RPC Function
+CREATE OR REPLACE FUNCTION match_documents (
+  query_embedding VECTOR(384),
+  match_threshold FLOAT DEFAULT 0.2,
+  match_count INT DEFAULT 5,
+  filter JSONB DEFAULT '{}'::jsonb
+)
+RETURNS TABLE (
+  id UUID,
+  filename TEXT,
+  content TEXT,
+  metadata JSONB,
+  similarity FLOAT
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    d.id,
+    d.filename,
+    d.content,
+    d.metadata,
+    1 - (d.embedding <=> query_embedding) AS similarity
+  FROM public.documents d
+  WHERE
+    (1 - (d.embedding <=> query_embedding)) > match_threshold
+    AND (filter = '{}'::jsonb OR d.metadata @> filter)
+  ORDER BY d.embedding <=> query_embedding ASC
+  LIMIT match_count;
+END;
+$$;
 CREATE OR REPLACE FUNCTION public.update_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
