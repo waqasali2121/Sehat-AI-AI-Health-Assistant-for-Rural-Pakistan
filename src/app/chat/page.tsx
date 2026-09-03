@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AppHeader } from "@/components/header";
 import { BottomNav } from "@/components/bottom-nav";
 import { Icon } from "@/components/icon";
-import { getPatientRecord, addChatRecord, getChatHistory, type ChatRecord } from "@/lib/patient-store";
+import { getPatientRecord, addChatRecord, getChatHistory } from "@/lib/patient-store";
 
 type Role = "system" | "user" | "ai";
 
@@ -277,7 +277,6 @@ export default function ChatPage() {
   const [isRecording, setIsRecording] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
   const [playingId, setPlayingId] = useState<string | null>(null);
-  const [patientName, setPatientName] = useState("Patient");
   const [pregnancyWeek, setPregnancyWeek] = useState(20);
   const streamEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -285,7 +284,6 @@ export default function ChatPage() {
     const record = getPatientRecord();
     const name = record.patient.fullName || "Patient";
     const week = record.patient.gestationalWeek || 20;
-    setPatientName(name);
     setPregnancyWeek(week);
 
     const welcomeMsg: Message = {
@@ -346,8 +344,16 @@ export default function ChatPage() {
         body: JSON.stringify({ messages: apiMessages, pregnancyWeek, language: "english" }),
       });
 
+      if (!res.ok) {
+        throw new Error(`API returned HTTP status ${res.status}`);
+      }
+
       const data = await res.json();
-      const replyText = data.reply || "I'm sorry, I couldn't process that. Please try again.";
+      if (!data.reply) {
+        throw new Error("No reply returned from API");
+      }
+
+      const replyText = data.reply;
 
       const aiMessage: Message = {
         id: `a-${Date.now()}`,
