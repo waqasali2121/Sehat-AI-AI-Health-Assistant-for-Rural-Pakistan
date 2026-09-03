@@ -34,19 +34,12 @@ export async function POST(req: NextRequest) {
     // 1. Attempt RAG Retrieval via pgvector if Supabase is connected
     if (supabase && lastUserMessage) {
       try {
-        let queryEmbedding: number[] | null = null;
-        try {
-          const { pipeline } = await import("@xenova/transformers");
-          const extractor = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
-          const output = await extractor(lastUserMessage, { pooling: "mean", normalize: true });
-          queryEmbedding = Array.from(output.data);
-        } catch {
-          const embedRes = await openai.embeddings.create({
-            model: "text-embedding-3-small",
-            input: lastUserMessage,
-          });
-          queryEmbedding = embedRes.data[0]?.embedding;
-        }
+        // Generate query embedding via OpenAI text-embedding-3-small
+        const embedRes = await openai.embeddings.create({
+          model: "text-embedding-3-small",
+          input: lastUserMessage,
+        });
+        const queryEmbedding = embedRes.data[0]?.embedding;
 
         if (queryEmbedding) {
           const { data: matchedDocs, error: rpcError } = await supabase.rpc("match_documents", {
