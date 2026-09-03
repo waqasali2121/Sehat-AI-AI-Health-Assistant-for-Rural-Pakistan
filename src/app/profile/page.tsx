@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { AppHeader } from "@/components/header";
 import { BottomNav } from "@/components/bottom-nav";
 import { Icon } from "@/components/icon";
+import { getPatientRecord, getChatHistory, extractConditionsFromChat, getRiskLevel, type PatientData, type ChatRecord } from "@/lib/patient-store";
 
 export default function ProfilePage() {
   const [expandedRecord, setExpandedRecord] = useState<string | null>("consultations");
@@ -12,6 +13,28 @@ export default function ProfilePage() {
   const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [lhwReminders, setLhwReminders] = useState(true);
   const [sehatSync, setSehatSync] = useState(false);
+  const [patient, setPatient] = useState<PatientData | null>(null);
+  const [chatCount, setChatCount] = useState(0);
+  const [riskLevel, setRiskLevel] = useState<"LOW" | "MEDIUM" | "HIGH">("LOW");
+  const [conditions, setConditions] = useState<string[]>([]);
+  const [chatHistory, setChatHistory] = useState<ChatRecord[]>([]);
+
+  useEffect(() => {
+    const record = getPatientRecord();
+    setPatient(record.patient);
+    const history = getChatHistory();
+    setChatHistory(history);
+    setChatCount(history.length);
+    setRiskLevel(getRiskLevel(history));
+    setConditions(extractConditionsFromChat(history));
+  }, []);
+
+  const p = patient;
+  const initials = p?.fullName
+    ? p.fullName.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2)
+    : "FB";
+  const trimester = p ? (p.gestationalWeek <= 12 ? "1st" : p.gestationalWeek <= 26 ? "2nd" : "3rd") : "2nd";
+  const progress = p ? Math.round((p.gestationalWeek / 40) * 100) : 60;
 
   return (
     <div className="flex flex-col flex-1 bg-surface">
@@ -22,21 +45,21 @@ export default function ProfilePage() {
         <section className="rounded-2xl bg-surface-container-low p-5 flex flex-col gap-4">
           <div className="flex items-start gap-4">
             <div className="w-14 h-14 rounded-full bg-primary-container flex items-center justify-center shrink-0">
-              <span className="text-primary font-headline-lg font-bold">FB</span>
+              <span className="text-primary font-headline-lg font-bold">{initials}</span>
             </div>
             <div className="flex flex-col gap-1 flex-1 min-w-0">
-              <h2 className="font-headline-md font-bold text-on-surface">Fatima Bibi</h2>
+              <h2 className="font-headline-md font-bold text-on-surface">{p?.fullName || "Patient"}</h2>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="inline-flex items-center gap-1 rounded-full bg-surface-container-highest px-2.5 py-0.5 text-label-sm text-on-surface-variant">
-                  Age: 26
+                  Age: {p?.age || "—"}
                 </span>
                 <span className="inline-flex items-center gap-1 rounded-full bg-primary-fixed-dim/30 px-2.5 py-0.5 text-label-sm text-primary">
                   <Icon name="favorite" className="text-[14px]" />
-                  B+
+                  {p?.bloodGroup || "—"}
                 </span>
               </div>
             </div>
-            <Link href="/register" className="text-label-sm text-primary font-semibold shrink-0">
+            <Link href="/profile-setup" className="text-label-sm text-primary font-semibold shrink-0">
               Edit
             </Link>
           </div>
@@ -45,17 +68,17 @@ export default function ProfilePage() {
           <div className="rounded-xl bg-surface-container p-4 flex flex-col gap-3">
             <div className="flex items-center justify-between">
               <span className="text-label-md text-on-surface-variant">Pregnancy Progress</span>
-              <span className="text-label-md font-semibold text-primary">Week 24 / 40</span>
+              <span className="text-label-md font-semibold text-primary">Week {p?.gestationalWeek || 24} / 40</span>
             </div>
             <div className="w-full h-2.5 rounded-full bg-surface-container-highest overflow-hidden">
               <div
                 className="h-full rounded-full bg-gradient-to-r from-primary-fixed-dim to-primary transition-all"
-                style={{ width: "60%" }}
+                style={{ width: `${progress}%` }}
               />
             </div>
             <div className="flex items-center justify-between text-label-sm">
-              <span className="text-on-surface-variant">2nd Trimester</span>
-              <span className="text-on-surface-variant font-medium">60% complete</span>
+              <span className="text-on-surface-variant">{trimester} Trimester</span>
+              <span className="text-on-surface-variant font-medium">{progress}% complete</span>
             </div>
           </div>
 
@@ -67,7 +90,7 @@ export default function ProfilePage() {
               </div>
               <div className="flex flex-col">
                 <span className="text-label-sm text-on-surface-variant">Expected Due Date</span>
-                <span className="text-label-md font-semibold text-on-surface">15 March 2027</span>
+                <span className="text-label-md font-semibold text-on-surface">{p?.expectedDueDate || "Not set"}</span>
               </div>
             </div>
 
@@ -77,9 +100,9 @@ export default function ProfilePage() {
               </div>
               <div className="flex flex-col flex-1 min-w-0">
                 <span className="text-label-sm text-on-surface-variant">LHW / Lady Health Worker</span>
-                <span className="text-label-md font-semibold text-on-surface">Nazia Begum</span>
+                <span className="text-label-md font-semibold text-on-surface">{p?.lhwName || "Not assigned"}</span>
               </div>
-              <a href="tel:+923001234567" className="shrink-0">
+              <a href={`tel:${p?.lhwPhone || ""}`} className="shrink-0">
                 <div className="w-9 h-9 rounded-full bg-primary flex items-center justify-center">
                   <Icon name="call" className="text-on-primary text-[18px]" />
                 </div>
@@ -91,10 +114,10 @@ export default function ProfilePage() {
                 <Icon name="person" className="text-on-surface-variant text-[20px]" />
               </div>
               <div className="flex flex-col flex-1 min-w-0">
-                <span className="text-label-sm text-on-surface-variant">Emergency Contact (Husband)</span>
-                <span className="text-label-md font-semibold text-on-surface">Muhammad Ashraf</span>
+                <span className="text-label-sm text-on-surface-variant">Emergency Contact</span>
+                <span className="text-label-md font-semibold text-on-surface">{p?.emergencyContactName || "Not set"}</span>
               </div>
-              <a href="tel:+923009876543" className="shrink-0">
+              <a href={`tel:${p?.emergencyContactPhone || ""}`} className="shrink-0">
                 <div className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center">
                   <Icon name="call" className="text-on-secondary text-[18px]" />
                 </div>
@@ -119,7 +142,7 @@ export default function ProfilePage() {
                 </div>
                 <div className="flex flex-col">
                   <span className="text-label-md font-semibold text-on-surface">Past AI Consultations</span>
-                  <span className="text-label-sm text-on-surface-variant">12 sessions recorded</span>
+                  <span className="text-label-sm text-on-surface-variant">{chatCount} sessions recorded</span>
                 </div>
               </div>
               <Icon
@@ -129,29 +152,29 @@ export default function ProfilePage() {
             </button>
             {expandedRecord === "consultations" && (
               <div className="px-4 pb-4 flex flex-col gap-2">
-                {[
-                  { date: "01 Sep 2026", topic: "Swelling in feet — Mild risk", risk: "LOW" },
-                  { date: "25 Aug 2026", topic: "Nutrition guidance — 2nd trimester", risk: "LOW" },
-                  { date: "18 Aug 2026", topic: "Headache & vision changes", risk: "MEDIUM" },
-                ].map((item, i) => (
-                  <div key={i} className="flex items-center gap-3 rounded-xl bg-surface-container p-3">
-                    <div className="flex flex-col flex-1 min-w-0">
-                      <span className="text-label-sm font-medium text-on-surface truncate">{item.topic}</span>
-                      <span className="text-label-sm text-on-surface-variant">{item.date}</span>
+                {chatHistory.length === 0 ? (
+                  <p className="text-label-sm text-on-surface-variant text-center py-3">No consultations yet</p>
+                ) : (
+                  chatHistory.slice(-5).reverse().map((item) => (
+                    <div key={item.id} className="flex items-center gap-3 rounded-xl bg-surface-container p-3">
+                      <div className="flex flex-col flex-1 min-w-0">
+                        <span className="text-label-sm font-medium text-on-surface truncate">{item.userMessage}</span>
+                        <span className="text-label-sm text-on-surface-variant">{new Date(item.timestamp).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}</span>
+                      </div>
+                      <span
+                        className={`shrink-0 rounded-full px-2 py-0.5 text-label-sm font-semibold ${
+                          item.riskFlag === "LOW"
+                            ? "bg-tertiary-container text-tertiary"
+                            : item.riskFlag === "MEDIUM"
+                              ? "bg-primary-container text-primary"
+                              : "bg-secondary-container text-secondary"
+                        }`}
+                      >
+                        {item.riskFlag || "LOW"}
+                      </span>
                     </div>
-                    <span
-                      className={`shrink-0 rounded-full px-2 py-0.5 text-label-sm font-semibold ${
-                        item.risk === "LOW"
-                          ? "bg-tertiary-container text-tertiary"
-                          : item.risk === "MEDIUM"
-                            ? "bg-primary-container text-primary"
-                            : "bg-secondary-container text-secondary"
-                      }`}
-                    >
-                      {item.risk}
-                    </span>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             )}
           </div>
@@ -371,10 +394,10 @@ export default function ProfilePage() {
 
         {/* Action Buttons */}
         <section className="flex flex-col gap-3">
-          <button className="w-full flex items-center justify-center gap-2 rounded-xl bg-surface-container py-3.5 text-label-md font-semibold text-on-surface transition-colors active:bg-surface-container-high">
+          <Link href="/health-card" className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-label-md font-semibold text-on-primary transition-colors active:bg-primary/90">
             <Icon name="download" className="text-[20px]" />
             Download Health Card
-          </button>
+          </Link>
           <Link href="/" className="w-full flex items-center justify-center gap-2 rounded-xl border border-secondary/30 py-3.5 text-label-md font-semibold text-secondary transition-colors active:bg-secondary-container/10">
             <Icon name="logout" className="text-[20px]" />
             Sign Out

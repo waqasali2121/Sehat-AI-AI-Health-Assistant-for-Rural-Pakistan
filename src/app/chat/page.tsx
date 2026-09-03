@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AppHeader } from "@/components/header";
 import { BottomNav } from "@/components/bottom-nav";
 import { Icon } from "@/components/icon";
+import { getPatientRecord, addChatRecord, getChatHistory, type ChatRecord } from "@/lib/patient-store";
 
 type Role = "system" | "user" | "ai";
 
@@ -269,32 +270,40 @@ function buildAiReply(prompt: string): Omit<Message, "id" | "time"> {
   };
 }
 
-const INITIAL_MESSAGES: Message[] = [
-  {
-    id: "m-welcome",
-    role: "system",
-    text: "Assalam o Alaikum Fatima. I am Dr. Ayesha, your AI maternal care assistant. Describe how you feel in Urdu or English — you can also record a voice note.",
-    urdu: "السلام علیکم فاطمہ۔ میں ڈاکٹر عائشہ ہوں، آپ کی اے آئی زچگی معاون۔ اپنی تکلیف اردو یا انگریزی میں بتائیں، آپ آواز کا پیغام بھی بھیج سکتی ہیں۔",
-    time: "10:12 AM",
-  },
-  {
-    id: "m-user-1",
-    role: "user",
-    text: "I have swelling in my feet",
-    urdu: "میرے پیروں میں سوجن ہے",
-    time: "10:14 AM",
-  },
-  { ...SWELLING_REPLY, id: "m-ai-1", time: "10:14 AM" } as Message,
-];
-
 export default function ChatPage() {
-  const [messages, setMessages] = useState<Message[]>(INITIAL_MESSAGES);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
   const [playingId, setPlayingId] = useState<string | null>(null);
+  const [patientName, setPatientName] = useState("Patient");
+  const [pregnancyWeek, setPregnancyWeek] = useState(20);
   const streamEndRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const record = getPatientRecord();
+    const name = record.patient.fullName || "Patient";
+    const week = record.patient.gestationalWeek || 20;
+    setPatientName(name);
+    setPregnancyWeek(week);
+
+    const welcomeMsg: Message = {
+      id: "m-welcome",
+      role: "system",
+      text: `Assalam o Alaikum ${name}. I am Dr. Ayesha, your AI maternal care assistant. You are at week ${week} of pregnancy. Describe how you feel in Urdu or English — you can also record a voice note.`,
+      urdu: `السلام علیکم ${name}۔ میں ڈاکٹر عائشہ ہوں، آپ کی اے آئی زچگی معاون۔ آپ حمل کے ${week}ویں ہفتے میں ہیں۔ اپنی تکلیف اردو یا انگریزی میں بتائیں۔`,
+      time: nowLabel(),
+    };
+
+    const savedHistory = getChatHistory();
+    const restoredMessages: Message[] = savedHistory.flatMap((chat) => [
+      { id: chat.id + "-u", role: "user" as Role, text: chat.userMessage, time: new Date(chat.timestamp).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) },
+      { id: chat.id + "-a", role: "ai" as Role, text: chat.aiResponse, time: new Date(chat.timestamp).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) },
+    ]);
+
+    setMessages([welcomeMsg, ...restoredMessages]);
+  }, []);
 
   useEffect(() => {
     streamEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -307,7 +316,7 @@ export default function ChatPage() {
     return () => window.clearInterval(timer);
   }, [isRecording]);
 
-  const sendMessage = useCallback((raw: string) => {
+  const sendMessage = useCallback(async (raw: string) => {
     const content = raw.trim();
     if (!content) return;
 
@@ -322,15 +331,61 @@ export default function ChatPage() {
     setDraft("");
     setIsTyping(true);
 
-    window.setTimeout(() => {
-      const reply = buildAiReply(content);
+    try {
+      const apiMessages = [
+        ...messages.filter((m) => m.role === "user" || m.role === "ai").slice(-6).map((m) => ({
+          role: m.role === "ai" ? ("assistant" as const) : ("user" as const),
+          content: m.text,
+        })),
+        { role: "user" as const, content },
+      ];
+
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: apiMessages, pregnancyWeek, language: "english" }),
+      });
+
+      const data = await res.json();
+      const replyText = data.reply || "I'm sorry, I couldn't process that. Please try again.";
+
+      const aiMessage: Message = {
+        id: `a-${Date.now()}`,
+        role: "ai",
+        text: replyText,
+        time: nowLabel(),
+        sections: [{ label: "Response", urduLabel: "جواب", body: replyText }],
+      };
+
+      setMessages((prev) => [...prev, aiMessage]);
+
+      addChatRecord({
+        userMessage: content,
+        aiResponse: replyText,
+        riskFlag: detectRisk(replyText),
+      });
+    } catch {
+      const fallback = buildAiReply(content);
       setMessages((prev) => [
         ...prev,
-        { ...reply, id: `a-${Date.now()}`, time: nowLabel() } as Message,
+        { ...fallback, id: `a-${Date.now()}`, time: nowLabel() } as Message,
       ]);
-      setIsTyping(false);
-    }, 1000);
-  }, []);
+      addChatRecord({
+        userMessage: content,
+        aiResponse: fallback.text,
+        riskFlag: "LOW",
+      });
+    }
+
+    setIsTyping(false);
+  }, [messages, pregnancyWeek]);
+
+  function detectRisk(reply: string): "LOW" | "MEDIUM" | "HIGH" {
+    const lower = reply.toLowerCase();
+    if (lower.includes("emergency") || lower.includes("go to the nearest hospital immediately") || lower.includes("call 1122")) return "HIGH";
+    if (lower.includes("visit") || lower.includes("warning") || lower.includes("concern")) return "MEDIUM";
+    return "LOW";
+  }
 
   const handleAudio = (message: Message) => {
     if (playingId === message.id) {
