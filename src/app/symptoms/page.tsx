@@ -5,7 +5,7 @@ import Link from "next/link";
 import { AppHeader } from "@/components/header";
 import { BottomNav } from "@/components/bottom-nav";
 import { Icon } from "@/components/icon";
-import { getPatientRecord, savePatientData } from "@/lib/patient-store";
+import { getPatientRecord, savePatientData, saveSymptomFormSubmission } from "@/lib/patient-store";
 
 export default function SymptomsPage() {
   const [isPlaying, setIsPlaying] = useState(false);
@@ -129,6 +129,12 @@ export default function SymptomsPage() {
     speechSynthesis.speak(u);
   };
 
+  // Detect emergency red flags
+  const hasEmergency =
+    warningSigns.some((w) => w !== "None of these") ||
+    bpSymptoms.some((s) => s === "Severe headache" || s === "Blurred vision" || s === "Face swelling") ||
+    highRiskConditions.some((h) => h === "High BP" || h === "Previous C-section" || h === "Placenta problem");
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     // Save snapshot to patient store
@@ -140,14 +146,51 @@ export default function SymptomsPage() {
       phone: phone || record.patient.phone,
       bloodGroup: bloodGroup || record.patient.bloodGroup,
     });
+
+    // Save 15-section form submission to central store for Admin inspection
+    saveSymptomFormSubmission({
+      patientName: name || record.patient.fullName || "Fatima Bibi",
+      age: Number(age) || 24,
+      phone: phone || "0300-1234567",
+      trimester,
+      edd,
+      bloodGroup,
+      isFirstPregnancy,
+      prevOutcomes,
+      morningSickness,
+      generalHealth,
+      warningSigns,
+      bpSystolic,
+      bpDiastolic,
+      bpStatus,
+      bpSymptoms,
+      currentWeight,
+      preWeight,
+      weightChange,
+      ultrasoundDone,
+      babyHeartbeat,
+      babyGrowth,
+      babyMovement,
+      placentaStatus,
+      hemoglobin,
+      bloodSugar,
+      infections,
+      urineResult,
+      vaginalSymptoms,
+      medicalHistory,
+      medicines,
+      dietaryHabits,
+      lifestyle,
+      vaccinations,
+      highRiskConditions,
+      lastDoctorVisit,
+      nextDoctorAppointment,
+      doctorAdvised,
+      hasEmergency,
+    });
+
     setIsSubmitted(true);
   };
-
-  // Detect emergency red flags
-  const hasEmergency =
-    warningSigns.some((w) => w !== "None of these") ||
-    bpSymptoms.some((s) => s === "Severe headache" || s === "Blurred vision" || s === "Face swelling") ||
-    highRiskConditions.some((h) => h === "High BP" || h === "Previous C-section" || h === "Placenta problem");
 
   return (
     <div className="flex flex-col min-h-screen bg-surface">
@@ -1243,20 +1286,20 @@ export default function SymptomsPage() {
                 Symptom Form Submitted!
               </h2>
               <p className="font-body-sm text-on-surface-variant">
-                آپ کے حمل کا فارم کامیابی سے محفوظ کر لیا گیا ہے۔ اے آئی ڈاکٹر عائشہ آپ کے تمام جوابات کا تجزیہ کرے گی۔
+                آپ کے حمل کا فارم کامیابی سے محفوظ کر لیا گیا ہے۔ ایڈمن پورٹل پر یہ ریکارڈ دیکھا جا سکتا ہے۔
               </p>
               <div className="grid grid-cols-2 gap-2 pt-2">
                 <Link
-                  href="/chat"
+                  href="/admin"
                   className="min-h-touch-min flex items-center justify-center gap-1 rounded-xl bg-primary text-on-primary font-label-md text-xs font-bold"
                 >
-                  Discuss with AI Doctor
+                  View in Admin Portal
                 </Link>
                 <Link
-                  href="/triage-result"
+                  href="/chat"
                   className="min-h-touch-min flex items-center justify-center gap-1 rounded-xl border border-primary text-primary font-label-md text-xs font-bold"
                 >
-                  View Triage Report
+                  Discuss with AI Doctor
                 </Link>
               </div>
             </div>

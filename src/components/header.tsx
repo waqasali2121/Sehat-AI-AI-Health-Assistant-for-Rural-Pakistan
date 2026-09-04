@@ -45,24 +45,15 @@ export function AppHeader({ subtitle, showBack = false, title }: HeaderProps) {
             </>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          {showBack ? (
-            <button
-              aria-label="Audio Readout"
-              className="min-h-touch-min min-w-touch-min p-inset-xs rounded-full bg-primary-container text-on-primary-container flex items-center justify-center transition-colors active:scale-95"
-            >
-              <Icon name="volume_up" className="text-body-lg" />
-            </button>
-          ) : (
-            <button
-              aria-label="Language Toggle"
-              className="min-h-touch-min min-w-touch-min px-inset-sm py-inset-xs rounded-full bg-surface-container-high text-primary font-label-sm text-label-sm flex items-center justify-center gap-1 active:scale-95 transition-transform"
-            >
-              <span className="font-bold">اردو</span>
-              <span className="text-outline-variant font-normal">/</span>
-              <span>ENG</span>
-            </button>
-          )}
+        <div className="flex items-center gap-1.5">
+          <Link
+            href="/admin"
+            title="Admin Login Portal"
+            className="min-h-touch-min px-2 py-1 rounded-full bg-primary/10 text-primary font-label-sm text-xs font-bold flex items-center gap-1 active:scale-95 transition-transform"
+          >
+            <Icon name="admin_panel_settings" className="text-sm" />
+            <span className="hidden xs:inline">Admin</span>
+          </Link>
           <a
             aria-label="Emergency SOS"
             href="tel:1122"
