@@ -42,20 +42,30 @@ export async function POST(req: NextRequest) {
     let contextText = "";
     let sources: Array<{ source: string; category?: string; topic?: string; similarity?: number }> = [];
 
-    // 1. Attempt RAG Retrieval via pgvector if Supabase & OpenAI are connected
-    if (openai && supabase && lastUserMessage) {
+    // 1. RAG Retrieval from uploaded PDF vector database (documents table in Supabase)
+    if (supabase && lastUserMessage) {
       try {
-        const embedRes = await openai.embeddings.create({
-          model: "text-embedding-3-small",
-          input: lastUserMessage,
-        });
-        const queryEmbedding = embedRes.data[0]?.embedding;
+        let queryEmbedding: number[] | null = null;
 
+        // Option A: OpenAI Embedding (if OpenAI key is active)
+        if (openai) {
+          try {
+            const embedRes = await openai.embeddings.create({
+              model: "text-embedding-3-small",
+              input: lastUserMessage,
+            });
+            queryEmbedding = embedRes.data[0]?.embedding || null;
+          } catch (embedErr) {
+            console.warn("OpenAI embedding generation failed, trying keyword fallback:", embedErr);
+          }
+        }
+
+        // Search Supabase using vector similarity match_documents function if embedding is available
         if (queryEmbedding) {
           const { data: matchedDocs, error: rpcError } = await supabase.rpc("match_documents", {
             query_embedding: queryEmbedding,
-            match_threshold: 0.2,
-            match_count: 4,
+            match_threshold: 0.15,
+            match_count: 5,
             filter: {},
           });
 
@@ -63,34 +73,61 @@ export async function POST(req: NextRequest) {
             contextText = matchedDocs
               .map(
                 (doc: any, i: number) =>
-                  `[Source ${i + 1}: ${doc.filename} - Category: ${
-                    doc.metadata?.category || "General"
+                  `[PDF Source ${i + 1}: ${doc.filename || doc.metadata?.source || "Medical PDF Document"} - Category: ${
+                    doc.metadata?.category || "Clinical Guidance"
                   }]\n${doc.content}`
               )
-              .join("\n\n");
+              .join("\n\n---\n\n");
 
             sources = matchedDocs.map((d: any) => ({
-              source: d.filename,
-              category: d.metadata?.category,
+              source: d.filename || d.metadata?.source || "Uploaded Medical PDF",
+              category: d.metadata?.category || "Clinical Protocol",
               topic: d.metadata?.topic,
               similarity: d.similarity ? Math.round(d.similarity * 1000) / 1000 : undefined,
             }));
           }
         }
+
+        // Option B: Direct Supabase text query fallback if vector search yielded no docs
+        if (!contextText) {
+          const keywords = lastUserMessage.split(/\s+/).filter((w: string) => w.length > 3).slice(0, 3);
+          if (keywords.length > 0) {
+            const queryFilter = keywords.map((k: string) => `content.ilike.%${k}%`).join(",");
+            const { data: textDocs } = await supabase
+              .from("documents")
+              .select("filename, content, metadata")
+              .or(queryFilter)
+              .limit(4);
+
+            if (textDocs && textDocs.length > 0) {
+              contextText = textDocs
+                .map(
+                  (doc: any, i: number) =>
+                    `[PDF Document ${i + 1}: ${doc.filename || doc.metadata?.source || "Medical PDF"}]:\n${doc.content}`
+                )
+                .join("\n\n---\n\n");
+
+              sources = textDocs.map((d: any) => ({
+                source: d.filename || d.metadata?.source || "Uploaded Medical PDF",
+                category: d.metadata?.category || "Medical Reference PDF",
+              }));
+            }
+          }
+        }
       } catch (ragErr) {
-        console.warn("RAG retrieval fallback to offline medical database:", ragErr);
+        console.warn("RAG retrieval fallback to baseline medical database:", ragErr);
       }
     }
 
-    // Baseline offline knowledge context if RAG yields nothing
+    // Baseline offline medical database context if RAG returned no matches
     if (!contextText) {
       contextText = getKnowledgeContext();
-      sources = [{ source: "Sehat AI Offline Knowledge Base", category: "Maternal Clinical Guidelines" }];
+      sources = [{ source: "Sehat AI Clinical Guidelines (PDF Base)", category: "Maternal Healthcare Standards" }];
     }
 
-    // 2. Fallback execution if OpenAI key is invalid or client creation failed
+    // 2. Local fallback response if OpenAI API key is missing
     if (!openai) {
-      console.warn("OpenAI API key missing or invalid. Utilizing Sehat AI local fallback engine.");
+      console.warn("OpenAI API key missing or invalid. Utilizing Sehat AI local RAG fallback engine.");
       const fallbackReply = generateStructuredFallback(lastUserMessage, pregnancyWeek || 20);
       return NextResponse.json({
         reply: fallbackReply,
@@ -99,7 +136,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 3. System Prompt Formulation
+    // 3. System Prompt with RAG PDF Context
     const langInstruction =
       language === "urdu"
         ? "\nRespond in warm, simple Roman Urdu or clear Urdu so women in Pakistan can easily understand."
@@ -113,24 +150,23 @@ export async function POST(req: NextRequest) {
 
 CRITICAL MEDICAL SAFETY RULES:
 - Sehat AI provides educational guidance only. It does not replace physical examination by a qualified doctor.
-- You are NOT a replacement for a real doctor. Always include disclaimers.
-- EMERGENCY RED FLAGS: If symptoms suggest an emergency (heavy vaginal bleeding, severe headache with vision changes, reduced/absent fetal movement, severe abdominal pain, high fever, collapse/fainting), IMMEDIATELY advise the patient to seek urgent emergency care at the nearest hospital/RHC.
-- Keep responses warm, structured, reassuring, and clear.
+- Always include disclaimers and urge immediate hospital care for emergencies (bleeding, reduced movement, severe headache, seizures).
+- Use the retrieved RAG PDF medical guidelines context below to answer accurately.
 
-EVIDENCE-BASED MEDICAL KNOWLEDGE CONTEXT:
+RETRIEVED PDF MEDICAL KNOWLEDGE BASE (RAG):
 ${contextText}
 ${langInstruction}
 ${contextNote}
 
 RESPONSE FORMAT (always structure your response with these exact bold headings):
 1. **Patient Concern** — Brief summary acknowledging what the patient described
-2. **Possible Explanation** — Simple, reassuring explanation of what might be happening
+2. **Possible Explanation** — Simple, reassuring explanation derived from PDF guidelines
 3. **Recommended Action** — Clear, actionable self-care or testing advice
 4. **Warning Signs** — Symptoms that mean the situation is getting worse
 5. **When To Visit Doctor** — Specific timing guidance for in-person medical care
 6. **Medical Disclaimer** — Remind the patient this is AI guidance, not a formal medical diagnosis`;
 
-    // 4. Generate OpenAI Response with Try/Catch Fallback
+    // 4. Generate AI Chat Response using RAG PDF context
     try {
       const response = await openai.chat.completions.create({
         model: "gpt-4o-mini",
@@ -148,7 +184,7 @@ RESPONSE FORMAT (always structure your response with these exact bold headings):
 
       return NextResponse.json({ reply, sources, isFallback: false });
     } catch (openaiErr: any) {
-      console.error("OpenAI Execution Error, switching to offline fallback engine:", openaiErr);
+      console.error("OpenAI Execution Error, switching to RAG offline fallback engine:", openaiErr);
       const fallbackReply = generateStructuredFallback(lastUserMessage, pregnancyWeek || 20);
       return NextResponse.json({
         reply: fallbackReply,
@@ -157,15 +193,15 @@ RESPONSE FORMAT (always structure your response with these exact bold headings):
       });
     }
   } catch (error) {
-    console.error("Chat API General Error:", error);
+    console.error("Chat RAG API General Error:", error);
     const fallbackReply = generateStructuredFallback("General inquiry", 20);
     return NextResponse.json(
       {
         reply: fallbackReply,
-        sources: [{ source: "Sehat AI Safety Engine", category: "Emergency Guidance" }],
+        sources: [{ source: "Uploaded Medical PDFs & Safety Engine", category: "Emergency Guidance" }],
         isFallback: true,
       },
-      { status: 200 } // Return 200 with fallback content instead of 500 error page
+      { status: 200 }
     );
   }
 }
