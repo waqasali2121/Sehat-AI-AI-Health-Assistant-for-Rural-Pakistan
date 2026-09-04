@@ -47,6 +47,7 @@ export interface SymptomFormSubmission {
   weightChange: string;
   ultrasoundDone: boolean;
   babyHeartbeat: string;
+  babyGrowth: string;
   babyMovement: string;
   placentaStatus: string;
   hemoglobin: string;
@@ -134,6 +135,7 @@ const seedRecords: PatientRecord[] = [
         weightChange: "Normal increase",
         ultrasoundDone: true,
         babyHeartbeat: "Normal",
+        babyGrowth: "Normal",
         babyMovement: "Normal",
         placentaStatus: "Normal",
         hemoglobin: "Low (Anemia)",
