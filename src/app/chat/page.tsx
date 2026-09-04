@@ -5,6 +5,7 @@ import { AppHeader } from "@/components/header";
 import { BottomNav } from "@/components/bottom-nav";
 import { Icon } from "@/components/icon";
 import { getPatientRecord, addChatRecord, getChatHistory } from "@/lib/patient-store";
+import { generateStructuredFallback } from "@/lib/knowledge/medical-database";
 
 type Role = "system" | "user" | "ai";
 
@@ -13,6 +14,12 @@ interface AiSection {
   urduLabel: string;
   body: string;
   urduBody?: string;
+}
+
+interface SourceInfo {
+  source: string;
+  category?: string;
+  similarity?: number;
 }
 
 interface Message {
@@ -26,6 +33,8 @@ interface Message {
   whenToVisit?: string;
   disclaimer?: string;
   audioScript?: string;
+  sources?: SourceInfo[];
+  isFallback?: boolean;
 }
 
 const QUICK_PROMPTS = [
@@ -59,215 +68,70 @@ function speakUrdu(text: string, onEnd?: () => void) {
   window.speechSynthesis.speak(utterance);
 }
 
-const SWELLING_REPLY: Omit<Message, "id" | "time"> = {
-  role: "ai",
-  text: "Swelling in the feet during pregnancy",
-  sections: [
-    {
-      label: "Patient Concern",
-      urduLabel: "مریض کی شکایت",
-      body: "Swelling (oedema) in both feet, noticed more in the evening, at 24 weeks of pregnancy.",
-      urduBody: "حمل کے چوبیسویں ہفتے میں دونوں پیروں میں سوجن، خاص طور پر شام کے وقت۔",
-    },
-    {
-      label: "Possible Explanation",
-      urduLabel: "ممکنہ وجہ",
-      body:
-        "Mild swelling of the feet and ankles is common after 20 weeks. Your body holds more fluid and the growing baby presses on the veins that return blood from your legs, so fluid collects in the lowest parts of the body.",
-      urduBody:
-        "بیس ہفتوں کے بعد پیروں اور ٹخنوں میں ہلکی سوجن عام بات ہے۔ جسم میں پانی بڑھ جاتا ہے اور بچہ رگوں پر دباؤ ڈالتا ہے۔",
-    },
-    {
-      label: "Recommended Action",
-      urduLabel: "تجویز کردہ اقدامات",
-      body:
-        "Rest with your legs raised on a pillow for 20 minutes, 3 times a day. Lie on your left side when sleeping. Avoid standing for long periods, wear loose slippers, drink 8-10 glasses of water and reduce salty foods and pickles.",
-      urduBody:
-        "دن میں تین بار بیس منٹ ٹانگیں تکیے پر اونچی رکھ کر آرام کریں۔ بائیں کروٹ سوئیں۔ نمک کم کریں اور آٹھ سے دس گلاس پانی پیئیں۔",
-    },
-  ],
-  warnings: [
-    { en: "Sudden swelling of the face, hands or around the eyes", ur: "چہرے، ہاتھوں یا آنکھوں کے گرد اچانک سوجن" },
-    { en: "Severe headache or blurred vision", ur: "شدید سر درد یا نظر کا دھندلا پن" },
-    { en: "Pain in the upper abdomen or under the ribs", ur: "پیٹ کے اوپری حصے یا پسلیوں کے نیچے درد" },
-    { en: "Swelling in only one leg with pain or redness", ur: "صرف ایک ٹانگ میں سوجن، درد یا سرخی" },
-  ],
-  whenToVisit:
-    "Visit your LHW or BHU within 48 hours to have your blood pressure and urine protein checked. Go immediately if any warning sign above appears — these can indicate pre-eclampsia.",
-  disclaimer: DISCLAIMER,
-  audioScript:
-    "حمل کے دوران پیروں کی ہلکی سوجن عام بات ہے۔ ٹانگیں اونچی رکھ کر آرام کریں، بائیں کروٹ سوئیں، نمک کم کریں اور پانی زیادہ پیئیں۔ اگر چہرے پر سوجن، شدید سر درد یا نظر دھندلی ہو تو فوراً ڈاکٹر کے پاس جائیں۔",
-};
+// Parse markdown headings from API text into structured UI sections
+function parseStructuredResponse(replyText: string): {
+  title: string;
+  sections: AiSection[];
+  warnings: { en: string; ur: string }[];
+  whenToVisit?: string;
+  disclaimer?: string;
+} {
+  const sections: AiSection[] = [];
+  const warnings: { en: string; ur: string }[] = [];
+  let whenToVisit: string | undefined;
+  let disclaimer: string | undefined;
+  let title = "Dr. Ayesha's Guidance";
 
-function buildAiReply(prompt: string): Omit<Message, "id" | "time"> {
-  const p = prompt.toLowerCase();
+  const lines = replyText.split("\n");
+  let currentHeader = "";
+  let currentContent: string[] = [];
 
-  if (p.includes("swell") || p.includes("feet") || p.includes("oedema") || p.includes("edema")) {
-    return SWELLING_REPLY;
-  }
+  const flush = () => {
+    if (!currentHeader) return;
+    const body = currentContent.join("\n").trim();
+    if (!body) return;
 
-  if (p.includes("move") || p.includes("movement") || p.includes("kick")) {
-    return {
-      role: "ai",
-      text: "Reduced baby movement",
-      sections: [
-        {
-          label: "Patient Concern",
-          urduLabel: "مریض کی شکایت",
-          body: "You feel your baby is moving less than usual today.",
-          urduBody: "آپ محسوس کر رہی ہیں کہ بچہ آج کم حرکت کر رہا ہے۔",
-        },
-        {
-          label: "Possible Explanation",
-          urduLabel: "ممکنہ وجہ",
-          body:
-            "Babies have sleep cycles of 20-40 minutes and movements can feel weaker when you are busy or standing. However, a real reduction in movement always needs to be checked.",
-          urduBody:
-            "بچے بیس سے چالیس منٹ سوتے ہیں اور مصروفیت میں حرکت کم محسوس ہوتی ہے، لیکن حرکت میں حقیقی کمی کی جانچ ضروری ہے۔",
-        },
-        {
-          label: "Recommended Action",
-          urduLabel: "تجویز کردہ اقدامات",
-          body:
-            "Lie on your left side in a quiet room after eating something sweet and count movements for 2 hours. You should feel at least 10 movements. Do not wait until tomorrow if the count is low.",
-          urduBody:
-            "کچھ میٹھا کھا کر پرسکون کمرے میں بائیں کروٹ لیٹیں اور دو گھنٹے میں حرکتیں گنیں۔ کم از کم دس حرکتیں محسوس ہونی چاہیئں۔",
-        },
-      ],
-      warnings: [
-        { en: "Fewer than 10 movements in 2 hours", ur: "دو گھنٹوں میں دس سے کم حرکتیں" },
-        { en: "No movement felt at all", ur: "کوئی حرکت محسوس نہ ہونا" },
-        { en: "Sudden violent movement then stillness", ur: "اچانک تیز حرکت اور پھر خاموشی" },
-      ],
-      whenToVisit:
-        "Go to the nearest BHU or hospital the same day for a fetal heart check or CTG. Reduced movement is never something to monitor at home overnight.",
-      disclaimer: DISCLAIMER,
-      audioScript:
-        "بائیں کروٹ لیٹ کر دو گھنٹے میں بچے کی حرکتیں گنیں۔ اگر دس سے کم حرکتیں ہوں تو آج ہی قریبی مرکز صحت جائیں۔",
-    };
-  }
+    const lowerHeader = currentHeader.toLowerCase();
 
-  if (p.includes("bleed") || p.includes("blood") || p.includes("spot")) {
-    return {
-      role: "ai",
-      text: "Bleeding during pregnancy",
-      sections: [
-        {
-          label: "Patient Concern",
-          urduLabel: "مریض کی شکایت",
-          body: "Vaginal bleeding or spotting during pregnancy.",
-          urduBody: "حمل کے دوران خون یا داغ آنا۔",
-        },
-        {
-          label: "Possible Explanation",
-          urduLabel: "ممکنہ وجہ",
-          body:
-            "Light spotting can follow an examination or intercourse, but bleeding after 20 weeks may come from the placenta and is treated as an emergency until a doctor confirms otherwise.",
-          urduBody:
-            "ہلکا داغ معائنے کے بعد ہو سکتا ہے، مگر بیس ہفتوں کے بعد خون آنا آنول سے ہو سکتا ہے اور یہ ایمرجنسی سمجھا جاتا ہے۔",
-        },
-        {
-          label: "Recommended Action",
-          urduLabel: "تجویز کردہ اقدامات",
-          body:
-            "Stop all activity and lie down. Use a clean pad — never insert anything inside. Note how much blood and its colour. Arrange transport to a facility with delivery services now.",
-          urduBody:
-            "کام روک کر لیٹ جائیں، صاف پیڈ استعمال کریں، اندر کچھ نہ ڈالیں اور فوراً ہسپتال جانے کا بندوبست کریں۔",
-        },
-      ],
-      warnings: [
-        { en: "Heavy bleeding soaking a pad in one hour", ur: "ایک گھنٹے میں پیڈ بھر جانا" },
-        { en: "Bleeding with abdominal pain or tight belly", ur: "خون کے ساتھ پیٹ میں درد یا سختی" },
-        { en: "Dizziness, fainting or fast heartbeat", ur: "چکر، بےہوشی یا دل کی تیز دھڑکن" },
-        { en: "Passing clots or tissue", ur: "خون کے لوتھڑے آنا" },
-      ],
-      whenToVisit:
-        "Go to the nearest hospital immediately or call 1122. Do not wait for the bleeding to stop on its own.",
-      disclaimer: DISCLAIMER,
-      audioScript:
-        "حمل میں خون آنا سنجیدہ علامت ہے۔ لیٹ جائیں، صاف پیڈ استعمال کریں اور فوراً ہسپتال جائیں یا ۱۱۲۲ پر کال کریں۔",
-    };
-  }
-
-  if (p.includes("nutrition") || p.includes("food") || p.includes("diet") || p.includes("eat")) {
-    return {
-      role: "ai",
-      text: "Nutrition in pregnancy",
-      sections: [
-        {
-          label: "Patient Concern",
-          urduLabel: "مریض کی شکایت",
-          body: "Guidance on what to eat during pregnancy with a limited household budget.",
-          urduBody: "کم خرچ میں حمل کے دوران کیا کھانا چاہیے۔",
-        },
-        {
-          label: "Possible Explanation",
-          urduLabel: "ممکنہ وجہ",
-          body:
-            "You need about 350 extra calories a day in the second trimester along with iron, calcium and folic acid to build your baby's blood, bones and brain.",
-          urduBody:
-            "دوسرے سہ ماہی میں روزانہ تقریباً ساڑھے تین سو اضافی کیلوریز، آئرن، کیلشیم اور فولک ایسڈ درکار ہوتے ہیں۔",
-        },
-        {
-          label: "Recommended Action",
-          urduLabel: "تجویز کردہ اقدامات",
-          body:
-            "Eat 5 small meals: dal or lobia daily for protein and iron, one seasonal fruit, palak or saag with a squeeze of lemon to absorb iron, one glass of milk or lassi, an egg if affordable, and take your iron and folic acid tablet after food.",
-          urduBody:
-            "دن میں پانچ چھوٹے کھانے: دال یا لوبیا، ایک موسمی پھل، پالک یا ساگ لیموں کے ساتھ، ایک گلاس دودھ یا لسی، اور کھانے کے بعد آئرن کی گولی۔",
-        },
-      ],
-      warnings: [
-        { en: "No weight gain for a month", ur: "ایک ماہ تک وزن نہ بڑھنا" },
-        { en: "Extreme tiredness, pale palms or eyelids", ur: "شدید کمزوری، ہاتھوں یا آنکھوں کی زردی" },
-        { en: "Unable to keep any food down", ur: "کھانا بالکل نہ ٹھہرنا" },
-      ],
-      whenToVisit:
-        "Discuss your haemoglobin level at your next LHW visit. If your palms look pale or you feel breathless on light work, get a blood test this week.",
-      disclaimer: DISCLAIMER,
-      audioScript:
-        "روزانہ دال، ایک پھل، پالک، دودھ یا لسی اور آئرن کی گولی لیں۔ دن میں پانچ چھوٹے کھانے کھائیں۔",
-    };
-  }
-
-  return {
-    role: "ai",
-    text: `About: ${prompt}`,
-    sections: [
-      {
-        label: "Patient Concern",
-        urduLabel: "مریض کی شکایت",
-        body: prompt,
-      },
-      {
-        label: "Possible Explanation",
-        urduLabel: "ممکنہ وجہ",
-        body:
-          "Many pregnancy symptoms are normal changes of the body, but some overlap with conditions such as anaemia, infection or high blood pressure. Your history at week 24 helps narrow this down.",
-        urduBody:
-          "حمل کی کئی علامات عام ہوتی ہیں، مگر کچھ خون کی کمی، انفیکشن یا بلڈ پریشر کی نشانی بھی ہو سکتی ہیں۔",
-      },
-      {
-        label: "Recommended Action",
-        urduLabel: "تجویز کردہ اقدامات",
-        body:
-          "Rest, drink 8-10 glasses of water, continue your iron and folic acid, and record when the symptom starts and how long it lasts. Share this record with your Lady Health Worker.",
-        urduBody:
-          "آرام کریں، آٹھ سے دس گلاس پانی پیئیں، آئرن اور فولک ایسڈ جاری رکھیں اور علامات کا وقت لکھ لیں۔",
-      },
-    ],
-    warnings: [
-      { en: "Severe or worsening pain", ur: "شدید یا بڑھتا ہوا درد" },
-      { en: "Bleeding or fluid leaking", ur: "خون یا پانی آنا" },
-      { en: "Fever above 100.4°F", ur: "بخار سو درجے سے زیادہ" },
-      { en: "Reduced baby movement", ur: "بچے کی حرکت کم ہونا" },
-    ],
-    whenToVisit:
-      "See your LHW within 2-3 days if the symptom continues, or go to the BHU today if any warning sign appears.",
-    disclaimer: DISCLAIMER,
-    audioScript:
-      "آرام کریں، پانی زیادہ پیئیں اور علامات نوٹ کریں۔ اگر تکلیف بڑھے تو قریبی مرکز صحت جائیں۔",
+    if (lowerHeader.includes("patient concern")) {
+      title = body.slice(0, 60) + (body.length > 60 ? "…" : "");
+      sections.push({ label: "Patient Concern", urduLabel: "مریض کی شکایت", body });
+    } else if (lowerHeader.includes("possible explanation")) {
+      sections.push({ label: "Possible Explanation", urduLabel: "ممکنہ وجہ", body });
+    } else if (lowerHeader.includes("recommended action")) {
+      sections.push({ label: "Recommended Action", urduLabel: "تجویز کردہ اقدامات", body });
+    } else if (lowerHeader.includes("warning signs")) {
+      const items = body.split("\n").filter((l) => l.trim().length > 0);
+      for (const item of items) {
+        const clean = item.replace(/^[-*•\d.]+\s*/, "");
+        if (clean) warnings.push({ en: clean, ur: "طبی معائنے کی ضرورت" });
+      }
+    } else if (lowerHeader.includes("when to visit doctor")) {
+      whenToVisit = body;
+    } else if (lowerHeader.includes("disclaimer")) {
+      disclaimer = body;
+    } else {
+      sections.push({ label: currentHeader, urduLabel: "معلومات", body });
+    }
   };
+
+  for (const line of lines) {
+    const headerMatch = line.match(/^(?:\d+\.\s*)?\*\*(.*?)\*\*:?\s*(.*)$/);
+    if (headerMatch) {
+      flush();
+      currentHeader = headerMatch[1].trim();
+      currentContent = headerMatch[2] ? [headerMatch[2]] : [];
+    } else if (currentHeader) {
+      currentContent.push(line);
+    }
+  }
+  flush();
+
+  if (sections.length === 0) {
+    sections.push({ label: "Response", urduLabel: "جواب", body: replyText });
+  }
+
+  return { title, sections, warnings, whenToVisit, disclaimer };
 }
 
 export default function ChatPage() {
@@ -295,10 +159,27 @@ export default function ChatPage() {
     };
 
     const savedHistory = getChatHistory();
-    const restoredMessages: Message[] = savedHistory.flatMap((chat) => [
-      { id: chat.id + "-u", role: "user" as Role, text: chat.userMessage, time: new Date(chat.timestamp).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) },
-      { id: chat.id + "-a", role: "ai" as Role, text: chat.aiResponse, time: new Date(chat.timestamp).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) },
-    ]);
+    const restoredMessages: Message[] = savedHistory.flatMap((chat) => {
+      const parsed = parseStructuredResponse(chat.aiResponse);
+      return [
+        {
+          id: chat.id + "-u",
+          role: "user" as Role,
+          text: chat.userMessage,
+          time: new Date(chat.timestamp).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }),
+        },
+        {
+          id: chat.id + "-a",
+          role: "ai" as Role,
+          text: parsed.title,
+          sections: parsed.sections,
+          warnings: parsed.warnings,
+          whenToVisit: parsed.whenToVisit,
+          disclaimer: parsed.disclaimer || DISCLAIMER,
+          time: new Date(chat.timestamp).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }),
+        },
+      ];
+    });
 
     setMessages([welcomeMsg, ...restoredMessages]);
   }, []);
@@ -314,82 +195,97 @@ export default function ChatPage() {
     return () => window.clearInterval(timer);
   }, [isRecording]);
 
-  const sendMessage = useCallback(async (raw: string) => {
-    const content = raw.trim();
-    if (!content) return;
+  const sendMessage = useCallback(
+    async (raw: string) => {
+      const content = raw.trim();
+      if (!content) return;
 
-    const userMessage: Message = {
-      id: `u-${Date.now()}`,
-      role: "user",
-      text: content,
-      time: nowLabel(),
-    };
+      const userMessage: Message = {
+        id: `u-${Date.now()}`,
+        role: "user",
+        text: content,
+        time: nowLabel(),
+      };
 
-    setMessages((prev) => [...prev, userMessage]);
-    setDraft("");
-    setIsTyping(true);
+      setMessages((prev) => [...prev, userMessage]);
+      setDraft("");
+      setIsTyping(true);
 
-    try {
-      const apiMessages = [
-        ...messages.filter((m) => m.role === "user" || m.role === "ai").slice(-6).map((m) => ({
-          role: m.role === "ai" ? ("assistant" as const) : ("user" as const),
-          content: m.text,
-        })),
-        { role: "user" as const, content },
-      ];
+      let replyText = "";
+      let sources: SourceInfo[] | undefined;
+      let isFallback = false;
 
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: apiMessages, pregnancyWeek, language: "english" }),
-      });
+      try {
+        const apiMessages = [
+          ...messages
+            .filter((m) => m.role === "user" || m.role === "ai")
+            .slice(-6)
+            .map((m) => ({
+              role: m.role === "ai" ? ("assistant" as const) : ("user" as const),
+              content: m.text,
+            })),
+          { role: "user" as const, content },
+        ];
 
-      if (!res.ok) {
-        throw new Error(`API returned HTTP status ${res.status}`);
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages: apiMessages, pregnancyWeek, language: "english" }),
+        });
+
+        const data = await res.json();
+        if (data.reply) {
+          replyText = data.reply;
+          sources = data.sources;
+          isFallback = !!data.isFallback;
+        } else {
+          throw new Error(data.error || "Network error");
+        }
+      } catch (err) {
+        console.warn("Chat API unreachable or failed. Falling back to local offline medical engine:", err);
+        replyText = generateStructuredFallback(content, pregnancyWeek);
+        isFallback = true;
+        sources = [{ source: "Sehat AI Local Medical Engine", category: "Offline Safety Guidelines" }];
       }
 
-      const data = await res.json();
-      if (!data.reply) {
-        throw new Error("No reply returned from API");
-      }
-
-      const replyText = data.reply;
+      const parsed = parseStructuredResponse(replyText);
 
       const aiMessage: Message = {
         id: `a-${Date.now()}`,
         role: "ai",
-        text: replyText,
+        text: parsed.title,
         time: nowLabel(),
-        sections: [{ label: "Response", urduLabel: "جواب", body: replyText }],
+        sections: parsed.sections,
+        warnings: parsed.warnings,
+        whenToVisit: parsed.whenToVisit,
+        disclaimer: parsed.disclaimer || DISCLAIMER,
+        sources,
+        isFallback,
       };
 
       setMessages((prev) => [...prev, aiMessage]);
+      setIsTyping(false);
 
       addChatRecord({
         userMessage: content,
         aiResponse: replyText,
         riskFlag: detectRisk(replyText),
       });
-    } catch {
-      const fallback = buildAiReply(content);
-      setMessages((prev) => [
-        ...prev,
-        { ...fallback, id: `a-${Date.now()}`, time: nowLabel() } as Message,
-      ]);
-      addChatRecord({
-        userMessage: content,
-        aiResponse: fallback.text,
-        riskFlag: "LOW",
-      });
-    }
-
-    setIsTyping(false);
-  }, [messages, pregnancyWeek]);
+    },
+    [messages, pregnancyWeek]
+  );
 
   function detectRisk(reply: string): "LOW" | "MEDIUM" | "HIGH" {
     const lower = reply.toLowerCase();
-    if (lower.includes("emergency") || lower.includes("go to the nearest hospital immediately") || lower.includes("call 1122")) return "HIGH";
-    if (lower.includes("visit") || lower.includes("warning") || lower.includes("concern")) return "MEDIUM";
+    if (
+      lower.includes("emergency") ||
+      lower.includes("go to the nearest hospital immediately") ||
+      lower.includes("call 1122") ||
+      lower.includes("immediate hospital")
+    )
+      return "HIGH";
+    if (lower.includes("visit") || lower.includes("warning") || lower.includes("concern") || lower.includes("soon"))
+      return "MEDIUM";
     return "LOW";
   }
 
@@ -402,7 +298,7 @@ export default function ChatPage() {
     const script =
       message.audioScript ??
       message.urdu ??
-      message.sections?.map((s) => s.urduBody ?? s.body).join(" ") ??
+      message.sections?.map((s) => `${s.label}: ${s.body}`).join(". ") ??
       message.text;
     setPlayingId(message.id);
     speakUrdu(script, () => setPlayingId(null));
@@ -512,9 +408,17 @@ export default function ChatPage() {
               </div>
               <div className="flex-1 min-w-0 rounded-2xl rounded-tl-sm bg-surface-container-lowest border border-outline-variant p-inset-md shadow-[0_2px_10px_rgba(19,27,46,0.05)] flex flex-col gap-stack-sm">
                 <div className="flex items-start justify-between gap-inset-sm">
-                  <p className="font-label-lg text-label-lg text-on-surface font-bold leading-snug">
-                    {message.text}
-                  </p>
+                  <div className="flex flex-col">
+                    <p className="font-label-lg text-label-lg text-on-surface font-bold leading-snug">
+                      {message.text}
+                    </p>
+                    {message.isFallback && (
+                      <span className="inline-flex items-center gap-1 font-label-sm text-[10px] text-tertiary font-semibold mt-0.5">
+                        <Icon name="offline_pin" className="text-xs" />
+                        Offline Safety Medical Database Response
+                      </span>
+                    )}
+                  </div>
                   <button
                     type="button"
                     onClick={() => handleAudio(message)}
@@ -544,7 +448,7 @@ export default function ChatPage() {
                         {section.urduLabel}
                       </span>
                     </div>
-                    <p className="font-body-sm text-body-sm text-on-surface leading-relaxed">
+                    <p className="font-body-sm text-body-sm text-on-surface leading-relaxed whitespace-pre-line">
                       {section.body}
                     </p>
                     {section.urduBody ? (
@@ -575,12 +479,6 @@ export default function ChatPage() {
                           <span className="font-body-sm text-body-sm text-on-error-container leading-snug">
                             • {warning.en}
                           </span>
-                          <span
-                            dir="rtl"
-                            className="font-body-sm text-[12px] text-on-error-container/80 leading-snug"
-                          >
-                            {warning.ur}
-                          </span>
                         </li>
                       ))}
                     </ul>
@@ -603,6 +501,21 @@ export default function ChatPage() {
                     </p>
                   </div>
                 ) : null}
+
+                {message.sources && message.sources.length > 0 && (
+                  <div className="rounded-lg bg-surface-container px-2.5 py-1.5 flex flex-col gap-1">
+                    <span className="font-label-sm text-[11px] font-bold text-on-surface-variant flex items-center gap-1">
+                      <Icon name="auto_stories" className="text-xs text-primary" />
+                      RAG Verified Medical Sources:
+                    </span>
+                    {message.sources.map((s, idx) => (
+                      <div key={idx} className="flex items-center justify-between text-[11px] text-outline">
+                        <span>📄 {s.source} ({s.category || "Clinical Standard"})</span>
+                        {s.similarity && <span>{(s.similarity * 100).toFixed(0)}% match</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
 
                 {message.disclaimer ? (
                   <div className="pt-inset-sm border-t border-outline-variant flex items-start gap-1.5">
