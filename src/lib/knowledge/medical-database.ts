@@ -176,61 +176,6 @@ export const medicalKnowledge: MedicalCondition[] = [
     doctor_recommendation:
       "Women with persistent vomiting should consult an obstetrician.",
   },
-  {
-    condition_name: "Ectopic Pregnancy",
-    category: "early_pregnancy",
-    definition:
-      "A pregnancy that develops outside the uterus, commonly inside the fallopian tube.",
-    pregnancy_stage: "First trimester",
-    symptoms: [
-      "One-sided abdominal pain",
-      "Vaginal bleeding",
-      "Shoulder pain",
-      "Dizziness",
-      "Fainting",
-    ],
-    risk_factors: [
-      "Previous ectopic pregnancy",
-      "Tubal surgery",
-      "Pelvic infection",
-      "Fertility treatment",
-    ],
-    mother_complications: ["Internal bleeding", "Shock", "Life-threatening emergency"],
-    baby_complications: ["Pregnancy cannot continue normally"],
-    diagnosis: ["Pregnancy hormone beta-hCG", "Transvaginal ultrasound"],
-    medical_management: [
-      "Medication (Methotrexate)",
-      "Surgical treatment if rupture occurs",
-    ],
-    emergency_signs: ["Severe abdominal pain", "Collapse", "Heavy bleeding"],
-    prevention: ["Early pregnancy ultrasound", "Regular antenatal care"],
-    doctor_recommendation: "Urgent obstetric evaluation required.",
-  },
-  {
-    condition_name: "Miscarriage (Spontaneous Abortion)",
-    category: "early_pregnancy",
-    definition: "Loss of pregnancy before fetal viability.",
-    pregnancy_stage: "Usually first trimester",
-    symptoms: ["Vaginal bleeding", "Abdominal cramps", "Tissue passing from vagina"],
-    risk_factors: [
-      "Chromosomal abnormalities",
-      "Maternal infections",
-      "Hormonal problems",
-      "Uterine abnormalities",
-    ],
-    mother_complications: ["Heavy bleeding", "Infection", "Emotional distress"],
-    baby_complications: ["Pregnancy loss"],
-    diagnosis: ["Ultrasound", "Pregnancy hormone monitoring"],
-    medical_management: [
-      "Expectant management",
-      "Medication",
-      "Surgical evacuation if required",
-    ],
-    emergency_signs: ["Heavy bleeding", "Severe pain", "Fever"],
-    prevention: ["Healthy lifestyle", "Prenatal care"],
-    doctor_recommendation:
-      "Medical assessment required after bleeding during pregnancy.",
-  },
 ];
 
 export function getKnowledgeContext(): string {
@@ -241,7 +186,6 @@ export function getKnowledgeContext(): string {
 ${c.definition}
 
 Symptoms: ${c.symptoms.join(", ")}
-Risk Factors: ${c.risk_factors.join(", ")}
 Emergency Signs: ${c.emergency_signs.join(", ")}
 Management: ${c.medical_management.join(", ")}
 Recommendation: ${c.doctor_recommendation}`;
@@ -260,26 +204,30 @@ export function findRelevantConditions(query: string): MedicalCondition[] {
   );
 }
 
-// Generate structured response when OpenAI is offline or API fails
-export function generateStructuredFallback(query: string, pregnancyWeek: number = 20): string {
-  const lower = query.toLowerCase();
+// Generate natural, direct response when OpenAI is offline or API fails
+export function generateStructuredFallback(query: string, pregnancyWeek: number = 20, language: string = "english"): string {
   const matched = findRelevantConditions(query);
+
+  if (language === "urdu") {
+    if (matched.length > 0) {
+      const main = matched[0];
+      return `السلام علیکم۔ حمل کے ${pregnancyWeek}ویں ہفتے میں ${main.condition_name} کی علامات پر توجہ دینا ضروری ہے۔\n\n` +
+        `**اہم مشورہ:** ${main.medical_management.slice(0, 2).join(". ")}۔ روزانہ 8-10 گلاس پانی پیئیں اور بائیں کروٹ سوئیں۔\n\n` +
+        `**اگر یہ علامات ہوں تو فوراً بی ایچ یو یا ہسپتال جائیں:** ${main.emergency_signs.join("، ")}۔`;
+    }
+    return `السلام علیکم۔ حمل کے ${pregnancyWeek}ویں ہفتے میں صحت کا خیال رکھنا ضروری ہے۔\n\n` +
+      `روزانہ 8 سے 10 گلاس صاف پانی پیئیں، غذائیت سے بھرپور کھانا (دالیں، پالک، لسی، انڈے) کھائیں اور آئرن اور فولک ایسڈ کی گولی لازمی لیں۔\n\n` +
+      `اگر شدید سر درد، خون آنا، یا بچے کی حرکت کم محسوس ہو تو فوراً بی ایچ یو یا ڈاکٹر سے رابطہ کریں۔`;
+  }
 
   if (matched.length > 0) {
     const main = matched[0];
-    return `1. **Patient Concern** — Assessment for ${main.condition_name} based on symptom description at week ${pregnancyWeek}.
-2. **Possible Explanation** — ${main.definition} This is a known maternal condition requiring careful monitoring.
-3. **Recommended Action** — ${main.medical_management.slice(0, 2).join(". ")}. Rest well, stay hydrated (8-10 glasses of water daily), and take prescribed prenatal supplements.
-4. **Warning Signs** — ${main.emergency_signs.join(", ")}.
-5. **When To Visit Doctor** — ${main.doctor_recommendation}
-6. **Medical Disclaimer** — Sehat AI provides educational information only and does not replace in-person consultation with a qualified doctor.`;
+    return `At week ${pregnancyWeek} of pregnancy, your concern aligns with **${main.condition_name}**.\n\n` +
+      `**Recommended Steps:** ${main.medical_management.join(". ")}. Rest well, lie on your left side, and keep yourself hydrated (8-10 glasses of water daily).\n\n` +
+      `**Red Flags to Watch:** ${main.emergency_signs.join(", ")}. If you notice any of these, visit your nearest BHU or hospital right away.`;
   }
 
-  // General fallback for unknown queries
-  return `1. **Patient Concern** — General pregnancy health inquiry ("${query}") at week ${pregnancyWeek}.
-2. **Possible Explanation** — Many symptoms during pregnancy (like mild fatigue, body changes, or swelling) are natural responses as your baby develops. However, any persistent discomfort should be evaluated.
-3. **Recommended Action** — Maintain adequate hydration (8-10 glasses of clean water), eat a nutrient-rich diet (dals, green leafy vegetables, milk), take daily Folic acid/Iron supplements, and rest with legs elevated.
-4. **Warning Signs** — Vaginal bleeding, severe abdominal pain, sudden face/hand swelling, blurred vision, severe headache, fever above 100.4°F, or reduced baby movements (<10 kicks in 2 hours).
-5. **When To Visit Doctor** — Schedule a visit to your local BHU/RHC or consult your Lady Health Worker (LHW) within 24-48 hours. Seek emergency care immediately if warning signs develop.
-6. **Medical Disclaimer** — Sehat AI provides educational assistance only and is not a substitute for professional medical diagnosis or emergency treatment.`;
+  return `Regarding your concern at week ${pregnancyWeek} of pregnancy:\n\n` +
+    `It is essential to stay well-hydrated (8-10 glasses of water daily), eat nutrient-rich foods (lentils, spinach, milk/eggs), take your daily Iron and Folic Acid supplements, and get sufficient rest.\n\n` +
+    `**When to seek immediate care:** If you experience severe abdominal pain, vaginal bleeding, sudden swelling of face/hands, or a reduction in baby movements (<10 movements in 2 hours), visit your nearest BHU/THQ clinic or call 1122 immediately.`;
 }

@@ -38,6 +38,7 @@ export async function POST(req: NextRequest) {
     const lastUserMessage = messages[messages.length - 1]?.content || "";
     const openai = getOpenAIClient();
     const supabase = getSupabaseClient();
+    const targetLang = language === "urdu" ? "urdu" : "english";
 
     let contextText = "";
     let sources: Array<{ source: string; category?: string; topic?: string; similarity?: number }> = [];
@@ -47,7 +48,6 @@ export async function POST(req: NextRequest) {
       try {
         let queryEmbedding: number[] | null = null;
 
-        // Option A: OpenAI Embedding (if OpenAI key is active)
         if (openai) {
           try {
             const embedRes = await openai.embeddings.create({
@@ -88,7 +88,7 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        // Option B: Direct Supabase text query fallback if vector search yielded no docs
+        // Text query fallback if vector search yielded no docs
         if (!contextText) {
           const keywords = lastUserMessage.split(/\s+/).filter((w: string) => w.length > 3).slice(0, 3);
           if (keywords.length > 0) {
@@ -128,7 +128,7 @@ export async function POST(req: NextRequest) {
     // 2. Local fallback response if OpenAI API key is missing
     if (!openai) {
       console.warn("OpenAI API key missing or invalid. Utilizing Sehat AI local RAG fallback engine.");
-      const fallbackReply = generateStructuredFallback(lastUserMessage, pregnancyWeek || 20);
+      const fallbackReply = generateStructuredFallback(lastUserMessage, pregnancyWeek || 20, targetLang);
       return NextResponse.json({
         reply: fallbackReply,
         sources,
@@ -136,35 +136,30 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 3. System Prompt with RAG PDF Context
+    // 3. Direct, Natural & Relevant System Prompt with RAG PDF Context
     const langInstruction =
-      language === "urdu"
-        ? "\nRespond in warm, simple Roman Urdu or clear Urdu so women in Pakistan can easily understand."
-        : "\nRespond in simple, reassuring English without medical jargon.";
+      targetLang === "urdu"
+        ? "CRITICAL LANGUAGE REQUIREMENT: You MUST reply entirely in clear, simple Urdu script (اردو) or warm, easy Roman Urdu so rural women in Pakistan can easily understand."
+        : "CRITICAL LANGUAGE REQUIREMENT: Reply in clear, simple, reassuring English without heavy medical jargon.";
 
     const contextNote = pregnancyWeek
-      ? `\nThe patient is currently at week ${pregnancyWeek} of pregnancy.`
+      ? `\nPatient status: Week ${pregnancyWeek} of pregnancy.`
       : "";
 
-    const SYSTEM_PROMPT = `You are Dr. Ayesha, an empathetic senior AI maternal health assistant serving pregnant women in Pakistan (especially rural areas with limited healthcare access).
+    const SYSTEM_PROMPT = `You are Dr. Ayesha, a warm, empathetic senior maternal healthcare doctor assisting pregnant women in Pakistan.
 
-CRITICAL MEDICAL SAFETY RULES:
-- Sehat AI provides educational guidance only. It does not replace physical examination by a qualified doctor.
-- Always include disclaimers and urge immediate hospital care for emergencies (bleeding, reduced movement, severe headache, seizures).
-- Use the retrieved RAG PDF medical guidelines context below to answer accurately.
+GUIDELINES FOR YOUR RESPONSE:
+1. Provide a DIRECT, RELEVANT, AND NATURAL answer to the patient's specific question. Do NOT repeat generic boilerplate intros or rigid templates unless clinically necessary.
+2. Base your advice on the RETRIEVED PDF MEDICAL KNOWLEDGE BASE provided below.
+3. Keep your response concise, clear, and actionable.
+4. SAFETY RULE: If symptoms indicate an emergency (e.g. heavy bleeding, reduced/absent baby movement, severe headache with vision changes, high fever, or fainting), clearly urge the patient to go to the nearest BHU/Hospital or call 1122 immediately.
+5. Always end with a brief reassurance and reminder that this is AI educational guidance.
 
-RETRIEVED PDF MEDICAL KNOWLEDGE BASE (RAG):
-${contextText}
 ${langInstruction}
 ${contextNote}
 
-RESPONSE FORMAT (always structure your response with these exact bold headings):
-1. **Patient Concern** — Brief summary acknowledging what the patient described
-2. **Possible Explanation** — Simple, reassuring explanation derived from PDF guidelines
-3. **Recommended Action** — Clear, actionable self-care or testing advice
-4. **Warning Signs** — Symptoms that mean the situation is getting worse
-5. **When To Visit Doctor** — Specific timing guidance for in-person medical care
-6. **Medical Disclaimer** — Remind the patient this is AI guidance, not a formal medical diagnosis`;
+RETRIEVED PDF MEDICAL KNOWLEDGE BASE (RAG):
+${contextText}`;
 
     // 4. Generate AI Chat Response using RAG PDF context
     try {
@@ -175,17 +170,17 @@ RESPONSE FORMAT (always structure your response with these exact bold headings):
           ...(messages as Array<{ role: "user" | "assistant" | "system"; content: string }>),
         ],
         temperature: 0.3,
-        max_tokens: 850,
+        max_tokens: 750,
       });
 
       const reply =
         response.choices[0]?.message?.content ??
-        generateStructuredFallback(lastUserMessage, pregnancyWeek || 20);
+        generateStructuredFallback(lastUserMessage, pregnancyWeek || 20, targetLang);
 
       return NextResponse.json({ reply, sources, isFallback: false });
     } catch (openaiErr: any) {
       console.error("OpenAI Execution Error, switching to RAG offline fallback engine:", openaiErr);
-      const fallbackReply = generateStructuredFallback(lastUserMessage, pregnancyWeek || 20);
+      const fallbackReply = generateStructuredFallback(lastUserMessage, pregnancyWeek || 20, targetLang);
       return NextResponse.json({
         reply: fallbackReply,
         sources,
@@ -194,7 +189,7 @@ RESPONSE FORMAT (always structure your response with these exact bold headings):
     }
   } catch (error) {
     console.error("Chat RAG API General Error:", error);
-    const fallbackReply = generateStructuredFallback("General inquiry", 20);
+    const fallbackReply = generateStructuredFallback("General inquiry", 20, "english");
     return NextResponse.json(
       {
         reply: fallbackReply,
