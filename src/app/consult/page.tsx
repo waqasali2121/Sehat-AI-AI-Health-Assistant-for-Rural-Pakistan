@@ -31,12 +31,12 @@ const consultationModes = [
   },
   {
     id: "visit",
-    href: "/consult#visit",
-    icon: "calendar_month",
+    href: "/clinics",
+    icon: "location_on",
     title: "Book Clinic / BHU Visit",
     urdu: "بی ایچ یو میں وقت لیں",
-    hint: "Reserve a slot at your nearest facility",
-    badge: null as string | null,
+    hint: "Map route & reserve slot at nearest BHU/THQ",
+    badge: "GPS Map",
     highlighted: false,
   },
 ];

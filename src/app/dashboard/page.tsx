@@ -379,15 +379,13 @@ export default function DashboardPage() {
               بنیادی مرکز صحت چک ۴۲ ایس بی
             </p>
           </div>
-          <a
-            href="https://maps.google.com/?q=Basic+Health+Unit+Chak+42+SB"
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="Get directions to BHU Chak 42-SB"
+          <Link
+            href="/clinics"
+            aria-label="View nearest clinic and map route"
             className="min-h-touch-min min-w-touch-min rounded-full bg-primary text-on-primary flex items-center justify-center shrink-0 active:scale-95 transition-transform"
           >
             <Icon name="directions" className="text-body-lg" />
-          </a>
+          </Link>
         </section>
 
         {/* Emergency SOS */}

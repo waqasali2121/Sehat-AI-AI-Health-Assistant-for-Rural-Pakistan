@@ -7,7 +7,7 @@ import { Icon } from "./icon";
 const navItems = [
   { path: "/dashboard", icon: "home", label: "Home", urduLabel: "ہوم" },
   { path: "/chat", icon: "smart_toy", label: "Doctor", urduLabel: "ڈاکٹر" },
-  { path: "/symptoms", icon: "stethoscope", label: "Symptoms", urduLabel: "علامات" },
+  { path: "/clinics", icon: "location_on", label: "Clinics/BHU", urduLabel: "کلینک" },
   { path: "/consult", icon: "video_camera_front", label: "Consult", urduLabel: "مشورہ" },
   { path: "/profile", icon: "person", label: "Profile", urduLabel: "پروفائل" },
 ];

@@ -149,13 +149,13 @@ export default function EmergencyPage() {
             Call 1122 — Rescue
           </a>
 
-          <a
-            href="#"
+          <Link
+            href="/clinics?emergency=true"
             className="w-full flex items-center justify-center gap-3 rounded-xl bg-primary py-4 text-label-lg font-bold text-on-primary transition-colors active:bg-primary-container"
           >
             <Icon name="local_hospital" className="text-[24px]" />
-            Nearest Hospital
-          </a>
+            Nearest Hospital & Map Route
+          </Link>
 
           <a
             href="tel:+923001234567"
